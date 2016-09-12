@@ -1,6 +1,6 @@
 # wificmd
 
-Wificmd, a wifi cammand tool to do wifi connection/disconnection with AP on Linux(Only works on Python3).
+Wificmd, a wifi command tool to do wifi connection/disconnection with AP on Linux(Only works on Python3).
 
 Features:
 - Security on connection.
