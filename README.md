@@ -12,20 +12,20 @@ Features:
 
 Usage:
 wificmd.py [-h] {scan,stat,con,discon,add,del,show}
-- wificmd.py scan [-i INTERFACE]          
-  Scan for in-range AP. Use 'wificmd scan -h' for more help
-- wificmd.py stat [-i INTERFACE]          
-  Show wificmd connection status. Use 'wificmd stat -h' for more help
-- wificmd.py con [-s SSID] [-i INTERFACE] 
-  Connect to added AP. Use 'wificmd con -h' for more help
-- wificmd.py discon [-i INTERFACE]        
-  Disconnect from AP. Use 'wificmd discon -h' for more help
-- wificmd.py add <ssid> [-p PASSWORD]     
-  Save a AP profile. Use 'wificmd add -h' for more help
-- wificmd.py del [-s SSID]                
-  Delete saved AP profile. Use 'wificmd del -h' for more help
-- wificmd.py show [-k KEYWORD]            
-  Show saved AP profile. Use 'wificmd show -h' for more help
+- wificmd.py scan [-h] [-i INTERFACE]          
+  Scan for in-range AP. 
+- wificmd.py stat [-h] [-i INTERFACE]          
+  Show wificmd connection status. 
+- wificmd.py con [-h] [-s SSID] [-i INTERFACE]        
+  Connect to added AP. 
+- wificmd.py discon [-h] [-i INTERFACE]        
+  Disconnect from AP. 
+- wificmd.py add <ssid> [-h] [-p PASSWORD]     
+  Save a AP profile. 
+- wificmd.py del [-h] [-s SSID]                
+  Delete saved AP profile. 
+- wificmd.py show [-h] [-k KEYWORD]            
+  Show saved AP profile. 
 
 Bugs:
 - Can not set the system DNS server on Ubuntu.
