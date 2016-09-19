@@ -29,6 +29,7 @@ wificmd.py [-h] {scan,stat,con,discon,add,del,show}
 
 Bugs:
 - Can not set the system DNS server on Ubuntu.
+- Cannot co-work with Linux comes NetworkManager. So before use wificmd, NetworkManager should be disabled by running "service network-manager stop" and "service wpa_supplicant stop"
 - And maybe other bugs.
 
 

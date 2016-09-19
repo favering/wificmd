@@ -198,6 +198,15 @@ def _net_status(wface_name):
     :param wface_name:
     :return: a tuple as (ip, gateway, net)
     """
+    cmd = ['ps', '-ef']
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out_lines = '\n' + proc.communicate()[0].decode()
+    reg_act = r"\n\w+\s+(\d+)\s+\d+.+python3\s+" + wpa_action_file
+    rst = re.search(reg_act, out_lines)
+    # wpa action script is still running(means it is obtaining IP address)
+    if rst is not None:
+        return "obtaining", "obtaining", None
+
     cmd = ['ip', 'addr', 'show', wface_name]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -235,30 +244,44 @@ def _wpa_status(wface_name):
     :param wface_name:
     :return: a tuple as (essid, signal)
     """
-    cmd = ['iwconfig', wface_name]
+    # get the wpa_state via wpa_cli
+    cmd = ['wpa_cli', 'status', '-i', wface_name, '-p', wpa_ctrl_sock]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError:
         raise CommandNotSupportedError(cmd[0])
     out_lines, err_lines = proc.communicate()
     if proc.returncode != 0:
-        raise NotImplementedError(wface_name + ':' + err_lines.decode('utf-8'))
+        raise NotImplementedError(wface_name + ':' + err_lines.decode())
 
-    out_lines = out_lines.decode('utf-8')
-    match = re.search(r'ESSID:\"(.+)\"', out_lines)
-    if match is None:
-        essid = None
-        signal = 0
-    else:
-        essid = match.group(1)
+    out_lines = out_lines.decode()
+    essid = re.search(r'wpa_state=(.+)', out_lines).group(1)
+    signal = None
+
+    # now only report the real essid when wpa status is "COMPLETED"
+    if essid == "COMPLETED":
+        cmd = ['iwconfig', wface_name]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError:
+            raise CommandNotSupportedError(cmd[0])
+        out_lines, err_lines = proc.communicate()
+        if proc.returncode != 0:
+            raise NotImplementedError(wface_name + ':' + err_lines.decode())
+
+        out_lines = out_lines.decode()
+        essid = re.search(r'ESSID:\"(.+)\"', out_lines).group(1)
+        essid = '"' + essid + '"'
         signal = re.search(r'Signal\s+level=(-\d+)\s+dBm', out_lines).group(1)
-    return essid, int(signal)
+        signal = int(signal)
+
+    return essid, signal
 
 def _pidof_wpa_supplicant_on(wface_name):
     """
     Return the pid of wpa_supplicant process working on wface_name
     :param wface_name:
-    :return: -1 if wpa_supplianct on wface_name not found
+    :return: None if wpa_supplianct on wface_name not found
              else the pid of wpa_supplianct
     """
     cmd = ['ps', '-ef']
@@ -266,14 +289,14 @@ def _pidof_wpa_supplicant_on(wface_name):
     out_lines = '\n' + proc.communicate()[0].decode()
     reg_wpa = r"\n\w+\s+(\d+)\s+\d+.+wpa_supplicant\s+-i\s+" + wface_name + r"\s+-Dwext"
     rst = re.search(reg_wpa, out_lines)
-    return -1 if rst is None else rst.group(1)
+    return None if rst is None else rst.group(1)
 
 def _pidof_wpa_cli_action_on(wface_name):
     """
     Return the pid of wpa_cli process working on wface_name, which response for
     the action to the wpa_supplicant's connection or disconnection
     :param wface_name:
-    :return: -1 if wpa_cli on wface_name not found
+    :return: None if wpa_cli on wface_name not found
              else the pid of wpa_cli
     """
     cmd = ['ps', '-ef']
@@ -282,7 +305,7 @@ def _pidof_wpa_cli_action_on(wface_name):
     reg_wpa = r"\n\w+\s+(\d+)\s+\d+.+wpa_cli\s+-i\s+" + wface_name \
               + r"\s+-a\s+" + wpa_action_file
     rst = re.search(reg_wpa, out_lines)
-    return -1 if rst is None else rst.group(1)
+    return None if rst is None else rst.group(1)
 
 def _wface_stat(wf_name):
     """
@@ -336,20 +359,18 @@ def list_wfaces(mode=None, state=None):
         wf_name = begin_matchs[idx].group(1)
         # mode
         wf_mode = re.search(r'Mode:\s*(\w+)', lines).group(1)
-        # essid signal
+        # essid
         match = re.search(r'ESSID:\"(.+)\"', out_lines)
-        if match is None:
-            wf_essid = None
-            wf_signal = 0
-        else:
-            wf_essid = match.group(1)
-            wf_signal = re.search(r'Signal\s+level=(-\d+)\s+dBm', out_lines).group(1)
+        wf_essid = None if match is None else match.group(1)
+        # signal
+        match = re.search(r'Signal\s+level=(-\d+)\s+dBm', out_lines)
+        wf_signal = None if match is None else int(match.group(1))
 
         # get the wireless interface's status(UP/DOWN)
         wf_state = _wface_stat(wf_name)
 
         # construct a WirelessInterface instance
-        wface = WirelessInterface(wf_name, wf_mode, None, wf_essid, int(wf_signal),wf_state)
+        wface = WirelessInterface(wf_name, wf_mode, None, wf_essid, wf_signal, wf_state)
         result[wf_name] = wface
 
     # filter by args
@@ -394,7 +415,10 @@ def scan(wface_name):
             lines = out_lines[begin_matchs[idx].start():begin_matchs[idx + 1].start()]
 
         mac = re.search(r'Address:\s+(([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})', lines).group(1)
-        ssid = re.search(r'ESSID:\s*\"(.+)\"', lines).group(1)
+        match = re.search(r'ESSID:\s*\"(.+)\"', lines)
+        if match is None:
+            continue
+        ssid = match.group(1)
         signal = re.search(r'Signal\s+level=(-\d+)\s+dBm', lines).group(1)
         signal = int(signal)
         if re.search(r'IE:.+WPA2', lines) is not None:
@@ -421,9 +445,8 @@ def stat(wface_name):
     d['wface_name'] = wface_name
     d['wpa_supp_pid'] = _pidof_wpa_supplicant_on(wface_name)
     d['wpa_cli_act_pid'] = _pidof_wpa_cli_action_on(wface_name)
-    d['essid'], d['signal'] = (None, None) if d['wpa_supp_pid'] == -1 else _wpa_status(wface_name)
+    d['essid'], d['signal'] = (None, None) if d['wpa_supp_pid'] is None else _wpa_status(wface_name)
     d['ip'], d['gateway'], d['net'] = _net_status(wface_name)
-
     return d
 
 def con(wface_name, ap_profiles):
@@ -441,15 +464,17 @@ def con(wface_name, ap_profiles):
     # write an empty wpa configuration file
     _write_wpa_conf({})
 
+    st = stat(wface_name)
     # launch wpa_supplicant
-    cmd = ['wpa_supplicant', '-i', wface_name, '-Dwext', '-c', wpa_conf_file, '-B']
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except OSError:
-        raise CommandNotSupportedError(cmd[0])
-    err_lines = proc.communicate()[1]
-    if proc.returncode != 0:
-        raise NotImplementedError(wface_name + ':' + err_lines.decode())
+    if st['wpa_supp_pid'] is None:
+        cmd = ['wpa_supplicant', '-i', wface_name, '-Dwext', '-c', wpa_conf_file, '-B']
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError:
+            raise CommandNotSupportedError(cmd[0])
+        err_lines = proc.communicate()[1]
+        if proc.returncode != 0:
+            raise NotImplementedError(wface_name + ':' + err_lines.decode())
 
     # make wpa_supplicant action(CONNECTED or DISCONNECTED) file
     try:
@@ -459,17 +484,18 @@ def con(wface_name, ap_profiles):
         raise
 
     # launch wpa_cli to specify the action when the wpa_supplicant connect or disconnect
-    cmd = ['wpa_cli', '-i', wface_name, '-a', wpa_action_file, '-p', wpa_ctrl_sock]
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError:
-        discon(wface_name)
-        raise CommandNotSupportedError(cmd[0])
+    if st['wpa_cli_act_pid'] is None:
+        cmd = ['wpa_cli', '-i', wface_name, '-a', wpa_action_file, '-p', wpa_ctrl_sock]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            discon(wface_name)
+            raise CommandNotSupportedError(cmd[0])
 
-    # Because wpa_cli run as daemon with option '-B' cannot start -a script correctly(as I
-    # tested),so wpa_cli run as normal proccess will not return at this moment,so it's
-    # impossiable to check wpa_cli' return code. It's better to sleep a little while.
-    time.sleep(1)
+        # Because wpa_cli run as daemon with option '-B' cannot start -a script correctly(as I
+        # tested),so wpa_cli run as normal proccess will not return at this moment,so it's
+        # impossiable to check wpa_cli' return code. It's better to sleep a little while.
+        time.sleep(0.7)
 
     #write the real wpa configuration file
     _write_wpa_conf(ap_profiles)
@@ -481,6 +507,9 @@ def con(wface_name, ap_profiles):
     if proc.returncode != 0:
         discon(wface_name)
         raise NotImplementedError(cmd + ':' + err_lines.decode('utf-8'))
+
+    # wait for wpa_supplicant reconfigure and dhclient
+    time.sleep(2.9)
 
 def discon(wface_name):
     """
@@ -508,7 +537,7 @@ def discon(wface_name):
             raise NotImplementedError(wface_name + ':' + err_lines)
 
     # kill wpa_cli response for action
-    if st['wpa_cli_act_pid'] != -1:
+    if st['wpa_cli_act_pid'] is not None:
         cmd = ['kill', '-9', st['wpa_cli_act_pid']]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         err_lines = proc.communicate()[1].decode()
@@ -516,7 +545,7 @@ def discon(wface_name):
             raise NotImplementedError(wface_name + ':' + err_lines)
 
     # kill wpa_supplicant
-    if st['wpa_supp_pid'] != -1:
+    if st['wpa_supp_pid'] is not None:
         # disconnect
         cmd = ['wpa_cli', 'discon', '-i', wface_name, '-p', wpa_ctrl_sock]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -566,7 +595,6 @@ class APNotInRangeError(Exception):
         self.ssid_list = ssid_list
         self.specified = specified
 
-
 class ProfileEncryptionError(Exception):
     def __init__(self, ssid, old, new):
         self.old = old
@@ -587,7 +615,7 @@ def stop_network_manager():
 def _make_wface_up(wface_name):
     """
     Make wireless interface up. Similar to "ifconfig <wface> up"
-    :param wface_name:
+    :param args.wface_name:
     :return:
     """
     subprocess.check_call(['ip', 'link', 'set', wface_name, 'up'])
@@ -596,49 +624,51 @@ def _scan(args):
     """
     [User function]
     Scan for in range AP.
-    :param wface_name: wireless interface used to scan
+    :param args.wface_name: wireless interface used to scan
     :return:
     """
     wface_name = args.interface
+    all_wface = list_wfaces()
 
-    # check the specified wireless interface
+    # check existence of the specified wireless interface
     if wface_name is not None:
-        all_wface = list_wfaces()
         if wface_name not in all_wface:
             raise WirelessInterfaceNotFoundError(wface_name)
-        # check wireless interface's status
-        if all_wface[wface_name].state == 'DOWN':
-            _make_wface_up(wface_name)
-        # currently suppose only managed mode can do scan
-        if all_wface[wface_name].mode != 'Managed':
-            raise WirelessInterfaceModeError(wface_name, all_wface[wface_name].mode)
-    # choise a wireless interface to scan
-    else:
-        if len(list_wfaces()) == 0:
-            raise NoWirelessInterfaceError()
-        mgd_wfaces = list_wfaces(mode='Managed')
-        if len(mgd_wfaces) == 0:
-            raise NoManagedWirelessInterfaceError()
-        wface_name = list(mgd_wfaces.keys())[0]
-        if mgd_wfaces[wface_name].state == 'DOWN':
-            _make_wface_up(wface_name)
 
-    # start scan
-    _msg_print.info("Using %s to scan..." % wface_name, end='')
-    try:
-        result = scan(wface_name)
-    except:
-        _msg_print.info('')
-        _msg_print.error(e)
-        raise
-    _msg_print.info("Done")
-    _format_output_scan_result(result)
+    # make and check the target wireless interface
+    target_wface = {wface_name: all_wface[wface_name]} if wface_name is not None else all_wface
+    if len(target_wface) == 0:
+        raise NoWirelessInterfaceError()
+
+    # use eche wireless interface to scan
+    for name in target_wface:
+        _msg_print.info("Using %s to scan..." % name, end='')
+
+        # currently suppose only managed mode can do scan
+        if all_wface[name].mode != 'Managed':
+            _proc_except(WirelessInterfaceModeError(name, all_wface[name].mode))
+            continue
+
+        # check wireless interface's status
+        if all_wface[name].state == 'DOWN':
+            _make_wface_up(name)
+
+        # start scan
+        try:
+            result = scan(name)
+        except BaseException as e:
+            _msg_print.info('')
+            _proc_except(e)
+            continue
+        _msg_print.info("Done")
+        _format_output_scan_result(result)
+        print("")
 
 def _stat(args):
     """
     [User function]
     Get the wificmd's connection status.
-    :param wface_name:
+    :param args.wface_name:
     :return:
     """
     wface_name = args.interface
@@ -658,46 +688,28 @@ def _stat(args):
 
     _format_output_con_status(con_status)
 
-def _con(args):
+def _check_con(wface, ssid):
     """
-    [User function]
-    Connect to AP.
-    :param wface_name: wireless interface name to use to connect
-    :param ssid: AP to connect
+    Check the wface, ssid and connnect.
+    :param wface: an WierlessInterface instance
+    :param ssid:
     :return:
     """
-    wface_name = args.interface
-    ssid = args.ssid
 
-    # check the specified wireless interface
-    if wface_name is not None:
-        all_wface = list_wfaces()
-        if wface_name not in all_wface:
-            raise WirelessInterfaceNotFoundError(wface_name)
-        # check wireless interface's status
-        if all_wface[wface_name].state == 'DOWN':
-            _make_wface_up(wface_name)
-        # currently suppose only managed mode can do connect
-        if all_wface[wface_name].mode != 'Managed':
-            raise WirelessInterfaceModeError(wface_name, all_wface[wface_name].mode)
-    # choise a right wireless interface to connect
-    else:
-        if len(list_wfaces()) == 0:
-            raise NoWirelessInterfaceError()
-        mgd_wfaces = list_wfaces(mode='Managed')
-        if len(mgd_wfaces) == 0:
-            raise NoManagedWirelessInterfaceError()
-        wface_name = list(mgd_wfaces.keys())[0]
-        if mgd_wfaces[wface_name].state == 'DOWN':
-            _make_wface_up(wface_name)
+    _msg_print.info("Using %s" % wface.name)
 
-    _msg_print.info("Using %s" % wface_name)
+    # currently suppose only managed mode can do connect
+    if wface.mode != 'Managed':
+        raise WirelessInterfaceModeError(wface.name, wface.mode)
 
-    # check AP profiles
+    # check wireless interface's status
+    if wface.state == 'DOWN':
+        _make_wface_up(wface.name)
+
     saved_profile = list_ap_profile()
-    scan_result = scan(wface_name)
+    scan_result = scan(wface.name)
 
-    # check specified ssid
+     # check specified ssid
     if ssid is not None:
         if ssid not in scan_result:
             raise APNotInRangeError(list([ssid]), specified=True)
@@ -721,9 +733,6 @@ def _con(args):
 
     # check saved ssid
     else:
-        if len(saved_profile) == 0:
-            raise NoAPProfile()
-
         # report error when there's no saved ap in range
         ap_in_range = {k: saved_profile[k] for k in saved_profile if k in scan_result}
         if len(ap_in_range) == 0:
@@ -739,17 +748,64 @@ def _con(args):
     # connect
     if ssid is not None:
         _msg_print.info("Connecting to %s..." % ssid, end='')
-        con(wface_name, {ssid: list_ap_profile()[ssid]})
+        con(wface.name, {ssid: list_ap_profile()[ssid]})
     else:
         _msg_print.info("Connecting to any avaiable AP...", end='')
-        con(wface_name, list_ap_profile())
+        con(wface.name, list_ap_profile())
     _msg_print.info('Done')
+
+def _con(args):
+    """
+    [User function]
+    Connect to AP.
+    :param args.wface_name: wireless interface name to use to connect
+    :param args.ssid: AP to connect
+    :return:
+    """
+    wface_name = args.interface
+    ssid = args.ssid
+    all_wface = list_wfaces()
+
+    # check existence of the specified wireless interface
+    if wface_name is not None:
+        if wface_name not in all_wface:
+            raise WirelessInterfaceNotFoundError(wface_name)
+
+    # make and check the target wireless interface
+    target_wface = {wface_name: all_wface[wface_name]} if wface_name is not None else all_wface
+    if len(target_wface) == 0:
+        raise NoWirelessInterfaceError()
+
+    # check if saved AP profile is empty
+    if ssid is None:
+        if len(list_ap_profile()) == 0:
+            raise NoAPProfile()
+
+    # connect each wireless interface
+    for name in target_wface:
+        st = stat(name)
+        # somewhat like a 'repair' action
+        if st['wpa_supp_pid'] is None or st['wpa_cli_act_pid'] is None:
+            try:
+                _check_con(target_wface[name], ssid)
+            except BaseException as e:
+                _proc_except(e)
+                continue
+            finally:
+                print()
+
+    # print each wireless interface connection status
+    for name in target_wface:
+        import argparse
+        nm = argparse.Namespace()
+        setattr(nm, 'interface', name)
+        _stat(nm)
 
 def _discon(args):
     """
     [User function]
     Disconnect from AP.
-    :param wface_name:
+    :param args.wface_name:
     :return:
     """
     wface_name = args.interface
@@ -768,25 +824,30 @@ def _discon(args):
         target_wface = all_wface.keys()
 
     # disconnect
-    for wface in target_wface:
-        discon(wface)
-        _stat(wface)
+    for name in target_wface:
+        discon(name)
+
+    # print each wireless interface connection status
+    for name in target_wface:
+        import argparse
+        nm = argparse.Namespace()
+        setattr(nm, 'interface', name)
+        _stat(nm)
 
 def _show(args):
     """
     Show stored AP profile.
-    :param args:
+    :param args.keyword:
     :return:
     """
 
     d = list_ap_profile(args.keyword)
     _format_output_ap_profile(d)
 
-
 def _add(args):
     """
     Add an AP profile to stored Profile list.
-    :param args:
+    :param args.ssid:
     :return:
     """
     if args.password is None:
@@ -799,7 +860,7 @@ def _add(args):
 def _del(args):
     """
     Delete an AP profile from stored Profile list.
-    :param args:
+    :param args.ssid:
     :return:
     """
 
@@ -815,7 +876,7 @@ def _del(args):
             elif choice == 'N':
                 return
             else:
-                _msg_print.info("Only Y or N accepted")
+                _msg_print.info("Only Y/y or N/n accepted")
                 continue
     else:
         clear_ap_profile(args.ssid)
@@ -847,7 +908,7 @@ def _format_output_con_status(con_status):
     for st in con_status:
         print("{0:20}".format(st['wface_name']), end='')
         fmt = " "*20
-        if st['wpa_supp_pid'] == -1 or st['wpa_supp_pid'] == -1:
+        if st['wpa_supp_pid'] is None or st['wpa_supp_pid'] is None:
             print("Not connected")
             print('');
             continue
@@ -859,8 +920,8 @@ def _format_output_con_status(con_status):
                 print('')
                 continue
             else:
-                print("ESSID:\"{}\"    Sinale Level:{} dbm".format(
-                    st['essid'], st['signal']))
+                print("ESSID:{}    Sinale Level:{}".format(
+                    st['essid'], st['signal'] if st['signal'] is None else str(st['signal'])+ " dbm"))
                 print(fmt + "IP:{}    Gateway:{}".format(
                     st['ip'], st['gateway']))
                 print('')
@@ -943,7 +1004,7 @@ def _parse_args():
     subparsers = parser.add_subparsers()
 
     parser_1 = subparsers.add_parser('scan', help='Scan for in-range AP. Use \'wificmd scan -h\' for more help')
-    parser_1.add_argument('-i', dest='interface', help='If not specified, it will randomly select an available wireless interface')
+    parser_1.add_argument('-i', dest='interface', help='If not specified, use each available wireless interface to scan')
     parser_1.set_defaults(func=_scan)
 
     parser_2 = subparsers.add_parser('stat', help='Show wificmd connection status. Use \'wificmd stat -h\' for more help')
@@ -952,7 +1013,7 @@ def _parse_args():
 
     parser_3 = subparsers.add_parser('con', help='Connect to added AP. Use \'wificmd con -h\' for more help')
     parser_3.add_argument('-s', '--ssid', help='If not specified, it will try to connect to any stored AP in range.')
-    parser_3.add_argument('-i', dest='interface', help='If not specified, it will randomly select an available wireless interface')
+    parser_3.add_argument('-i', dest='interface', help='If not specified, use each available wireless interface to connect')
     parser_3.set_defaults(func=_con)
 
     parser_4 = subparsers.add_parser('discon', help='Disconnect from AP. Use \'wificmd discon -h\' for more help')
@@ -978,6 +1039,70 @@ def _parse_args():
         sys.exit(-1)
     return args
 
+def _proc_except(e):
+    """
+    Print exception message.
+    :param e:
+    :return:
+    """
+
+    if isinstance(e, NoAPProfile):
+        _msg_print.error("No saved AP profile found.")
+        _msg_print.info("Use \"wificmd con [-s ssid]\" or \"wificmd add <ssid> [-p password]\" to add an AP.")
+
+    elif isinstance(e, ProfileNotFoundError):
+        _msg_print.error("'%s' not found" % e.ssid)
+
+    elif isinstance(e, CommandNotSupportedError):
+        _msg_print.error("\"%s\" is needed but not found in your system." % e.cmd)
+
+    elif isinstance(e, CreateFileError):
+        _msg_print.error("Can not create file. %s" % e.err)
+
+    elif isinstance(e, DeviceBusyError):
+        _msg_print.error("%s was busy, try latter." % e.wface_name)
+
+    elif isinstance(e, WPAConfigEmptyError):
+        _msg_print.error("wpa_supplicant configuration file is empty!")
+
+    elif isinstance(e, NotSupportedEncrytionError):
+        _msg_print.error("Not supported Encrytion: %s" % e.enc)
+
+    elif isinstance(e, NoWirelessInterfaceError):
+        _msg_print.error("No wireless interface found in your device!")
+
+    elif isinstance(e, WirelessInterfaceNotFoundError):
+        _msg_print.error("\"%s\" not found in your device!" % e.wface_name)
+
+    elif isinstance(e, WirelessInterfaceModeError):
+        _msg_print.error("\"%s\" mode error.(current mode: %s)" % (e.wface_name, e.mode))
+
+    elif isinstance(e, NoManagedWirelessInterfaceError):
+        _msg_print.error("None of wireless interface is in Managed mode.")
+
+    elif isinstance(e, APNotInRangeError):
+        if e.specified:
+            _msg_print.error("\"%s\" is not in range." % e.ssid_list[0])
+            _msg_print.info("Dose ssid spell correctly? Use \"wificmd scan\" to view in range AP.")
+        else:
+            _msg_print.error("None of saved AP is in range.")
+
+    elif isinstance(e, ProfileEncryptionError):
+        _msg_print.error("\"%s\" encryption changed.(saved encrypiton: %s, detected encryption: %s)"
+                         % (e.ssid, e.old, e.new))
+        _msg_print.info("Use \"wificmd del -s <ssid>\" and \"wificmd add\" to re-add it.")
+
+    elif isinstance(e, NotImplementedError):
+        _msg_print.error(e)
+        print(e.with_traceback())
+
+    elif isinstance(e, KeyboardInterrupt):
+        print("")
+        sys.exit()
+
+    else:
+        raise
+
 _msg_print = MessagePrint()
 
 if __name__ == '__main__':
@@ -998,55 +1123,5 @@ if __name__ == '__main__':
     args = _parse_args()
     try:
         args.func(args)
-    except NoAPProfile as e:
-        _msg_print.error("No saved AP profile found.")
-        _msg_print.info("Use \"wificmd con [-s ssid]\" or \"wificmd add <ssid> [-p password]\" to add an AP.")
-
-    except ProfileNotFoundError as e:
-        _msg_print.error("'%s' not found" % e.ssid)
-
-    except CommandNotSupportedError as e:
-        _msg_print.error("\"%s\" is needed but not found in your system." % e.cmd)
-
-    except CreateFileError as e:
-        _msg_print.error("Can not create file. %s" % e.err)
-
-    except DeviceBusyError as e:
-        _msg_print.error("%s was busy, try latter." % e.wface_name)
-
-    except WPAConfigEmptyError as e:
-        _msg_print.error("wpa_supplicant configuration file is empty!")
-
-    except NotSupportedEncrytionError as e:
-        _msg_print.error("Not supported Encrytion: %s" % e.enc)
-
-    except NoWirelessInterfaceError as e:
-        _msg_print.error("No wireless interface found in your device!")
-
-    except WirelessInterfaceNotFoundError as e:
-        _msg_print.error("\"%s\" not found in your device!" % e.wface_name)
-
-    except WirelessInterfaceModeError as e:
-        _msg_print.error("\"%s\" mode error.(current mode: %s)" % (e.wface_name, e.mode))
-
-    except NoManagedWirelessInterfaceError as e:
-        _msg_print.error("None of wireless interface is in Managed mode.")
-
-    except APNotInRangeError as e:
-        if e.specified:
-            _msg_print.error("\"%s\" is not in range." % e.ssid_list[0])
-            _msg_print.info("Dose ssid spell correctly? Use \"wificmd scan\" to view in range AP.")
-        else:
-            _msg_print.error("None of saved AP is in range.")
-
-    except ProfileEncryptionError as e:
-        _msg_print.error("\"%s\" encryption changed.(saved encrypiton: %s, detected encryption: %s)"
-                         % (e.ssid, e.old, e.new))
-        _msg_print.info("Use \"wificmd del -s <ssid>\" and \"wificmd add\" to re-add it.")
-
-    except NotImplementedError as e:
-        _msg_print.error(e)
-
-    except KeyboardInterrupt:
-        print("")
-        sys.exit()
+    except BaseException as e:
+        _proc_except(e)
