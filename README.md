@@ -1,6 +1,6 @@
 # wificmd
 
-Wificmd, a wifi command tool to do wifi connection/disconnection with AP on Linux(Only works on Python3).
+Wificmd, a wifi command tool to do wifi connection/disconnection with AP on Linux(Has been tested on Kali & Ubuntu).
 
 Features:
 - Security on connection.
@@ -8,7 +8,6 @@ Features:
   However, if -s was specified when using \"wificmd con\", it will always try to connect with that AP. This is useful when doing some penetration work on wifi.
 - Support multiple wireless interface connection.
 - A list of core wifi function can be imported in your python code to write your owned wifi connection tool.
-- Networkmanager.
 
 Usage:
 wificmd.py [-h] {scan,stat,con,discon,add,del,show}
@@ -29,7 +28,6 @@ wificmd.py [-h] {scan,stat,con,discon,add,del,show}
 
 Bugs:
 - Can not set the system DNS server on Ubuntu.
-- Cannot co-work with Linux comes NetworkManager. So before use wificmd, NetworkManager should be disabled by running "service network-manager stop" and "service wpa_supplicant stop"
-- And maybe other bugs.
+- And other bugs.
 
 

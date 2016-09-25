@@ -458,6 +458,15 @@ def con(wface_name, ap_profiles):
     :except: CommandNotSupportedError
     """
 
+    # Disable the Linux comes Networkmanager
+    cmd = ['service', 'network-manager', 'stop']
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
+        raise CommandNotSupportedError(cmd[0])
+    proc.communicate()
+    subprocess.call(['service', 'wpa_supplicant', 'stop'])
+
     if len(ap_profiles) == 0:
         raise WPAConfigEmptyError()
 
