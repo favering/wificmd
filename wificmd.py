@@ -612,15 +612,6 @@ class ProfileEncryptionError(Exception):
 class NoAPProfile(Exception):
     pass
 
-def network_manager_status():
-    out_lines = subprocess.check_output(["ps", "-e"])
-    if not "NetworkManager" in out_lines:
-        return False
-    return True
-
-def stop_network_manager():
-    subprocess.check_output(["service", "network-manager", "stop"])
-
 def _make_wface_up(wface_name):
     """
     Make wireless interface up. Similar to "ifconfig <wface> up"
