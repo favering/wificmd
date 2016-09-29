@@ -9,7 +9,7 @@ Features:
 - Support multiple wireless interface connection.
 - A list of core wifi function can be imported in your python code to write your owned wifi connection tool.
 
-Usage:
+# Usage:
 wificmd.py [-h] {scan,stat,con,discon,add,del,show}
 - wificmd.py scan [-h] [-i INTERFACE]          
   Scan for in-range AP. 
@@ -26,7 +26,7 @@ wificmd.py [-h] {scan,stat,con,discon,add,del,show}
 - wificmd.py show [-h] [-k KEYWORD]            
   Show saved AP profile. 
 
-Bugs:
+# Bugs:
 - Can not set the system DNS server on Ubuntu.
 - And other bugs.
 
