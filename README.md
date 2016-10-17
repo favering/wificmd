@@ -1,6 +1,7 @@
 # wificmd
 
-wificmd, a wifi command tool to do wifi connection/disconnection with AP on Linux(Has been tested on Kali & Ubuntu).
+wificmd, a wifi command tool to do wifi connection/disconnection with AP.
+(Only works on Linux. Has been tested on kali & ubuntu).
 
 Features:
 - Security on connection.
