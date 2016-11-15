@@ -606,6 +606,7 @@ class APNotInRangeError(Exception):
 
 class ProfileEncryptionError(Exception):
     def __init__(self, ssid, old, new):
+        self.ssid = ssid
         self.old = old
         self.new = new
 
@@ -741,7 +742,7 @@ def _check_con(wface, ssid):
         # check if any ap'encryption has changed
         for k in ap_in_range:
             if ap_in_range[k].encryption != scan_result[k].encryption:
-                raise ProfileEncryptionError(ssid, ap_in_range[k].encryption,
+                raise ProfileEncryptionError(k, ap_in_range[k].encryption,
                                              scan_result[k].encryption)
         _msg_print.info("Avaiable in range AP: {}".format(list(ap_in_range.keys())))
 
